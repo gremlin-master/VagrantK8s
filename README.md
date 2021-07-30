@@ -27,7 +27,13 @@
   - [Kubeconfig](#kubeconfig)
 - [Applications](#applications)
   - [Dashboard](#dashboard)
-- [Network settings](#network-settings)
+- [Network setup](#network-setup-1)
+  - [Network requirements](#network-requirements)
+    - [Write down the requirements](#write-down-the-requirements)
+    - [Map the requirements with the available connection methods](#map-the-requirements-with-the-available-connection-methods)
+    - [Select or combine networking modes to fulfill all requirements](#select-or-combine-networking-modes-to-fulfill-all-requirements)
+  - [VM network setup](#vm-network-setup)
+  - [Guest OS network setup](#guest-os-network-setup)
   - [Help](#help)
 - [Kubectl](#kubectl)
 - [Configuration files](#configuration-files)
@@ -422,41 +428,120 @@ References:
 - <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>
 - <https://github.com/kubernetes/dashboard/blob/master/docs/user/access-control/creating-sample-user.md>
 
-## Network settings
+## Network setup
 
-The default networking mode for virtualbox VMs is NAT. With a NAT configuration the VMs can send packages to the external network and can receive answers. It is however not possible to have a network connection between several vms.
-
-Each other networking mode that is available in virtualbox allows the connection of the VMs among themselves but disallows some other connections that we want to have.
-
-As a general guideline you write down your needs and then select the appropriate networking mode for it. For more complicated setups you may add additional network adapters to the VM and then select the needed networking mode for each adapter to be able to fulfill your needs.
-
-Our needs are the following:
-
-- Host needs access to VMs
-- VMs need a network connection among themselves
-- VMs need a network connection to the hosts network
-- No access from host network to VM as long as we do not allow it via a port forwarding
-
-When we look up the different networking modes at <https://www.virtualbox.org/manual/ch06.html#networkingmodes> we notice that the only networking mode that fulfills all requirements is NATservice.
-
-However if we examine our VM we see that the already available network adapter is running in NAT networking mode and this is the reason for it:
-
-> With VirtualBox, Vagrant requires the first network device attached to the virtual machine to be a NAT device. The NAT device is used for port forwarding, which is how Vagrant gets SSH access to the virtual machine.
-> Therefore, any host-only or bridged networks will be added as additional network devices and exposed to the virtual machine as "eth1", "eth2", and so on."eth0" or "en0" is generally always the NAT device.
-> It isn't currently possible to override this requirement, but it is important to understand that it is in place.
->
-> <cite>-- O'Reilly  
-> https://www.oreilly.com/library/view/vagrant-up-and/9781449336103/ch04.html
-> </cite>
-
-This mode fulfills all requirements exept the one that the VMs need a connection between themselves. So instead of adding a NAT network we can also add a second adapter that uses the Internal networking mode because the only thing this networking mode provides is adding the missing connection between the VMs. Because setting up a NAT network is far more complex than setting up an internal network we will use the Internal network mode
-
-The following network diagram describes the art of network that we will setup for the vagrant kubernetes installation
+This network diagram describes the kind of network that we will setup for the kubernetes installation
 
 ![Network architecture](images/vagrant_network_architecture.png)
 
+Because this involves a lot of configuration and research the network setup is splitted into the following parts:
+
+- Finding out the network requirements
+- Setting up the network for the vms
+- Setting up the network for the guest OS
+
+### Network requirements
+
+To find out the needed network requirements I recommend the following approach:
+
+1. Write down your requirements
+1. Open the virtual box [networking modes](https://www.virtualbox.org/manual/ch06.html#networkingmodes) page and map your requirements with the available connection methods
+1. Select a networking mode or combine several networking modes to create a network configuration that fulfills all requirements
+
+#### Write down the requirements
+
+Our requirements are the following:
+
+1. The VMs need a network connection among themselves because they all together form the K8s cluster
+1. VMs need a network connection to the hosts network to be able to fetch updates and additional software from the internet
+1. Host needs direct access to a master vm to be able to administrate the K8s cluster
+1. Services from the K8s cluster are only accessible from the external network if they were made available via port forwarding
+
+#### Map the requirements with the available connection methods
+
+1. Open the virtual box [networking modes](https://www.virtualbox.org/manual/ch06.html#networkingmodes) page
+1. Create a table with the connection methods as header:
+
+    |VM→Host |VM←Host |VM1↔VM2 |VM→Net/LAN |VM←Net/LAN
+    |--------|--------|--------|-----------|----------
+    |        |        |        |           |
+
+1. Now for each of your network requirements do the following:
+   1. Read the requirement
+   1. Find out which connection method is needed to support it
+   1. Mark the needed connection method in the previously created table
+
+As example we will match the connection methods from [Write down the requirements](#write-down-the-requirements):
+
+1. The VMs need a network connection among themselves: *VM1↔VM2*
+2. VMs need a network connection to the hosts network: *VM→Net/LAN*
+3. Host needs direct access to a master vm to be able to administrate the K8s cluster: *VM←Host*
+4. Services from the K8s cluster are only accessible from the external network if they were made available via port forwarding: *VM←Net/LAN* with entry *Port forward*
+5. The resulting table is the following
+
+    |VM→Host |VM←Host |VM1↔VM2 |VM→Net/LAN |VM←Net/LAN
+    |--------|--------|--------|-----------|----------
+    |        |X       |X       |X          |Port forward
+
+#### Select or combine networking modes to fulfill all requirements
+
+1. Compare the created table with the table of the available networking modes and mark the network modes that support all needed connection possibilities
+1. In our case we have the following mode that directly supports all needed connection modes:
+
+    - NATservice
+1. As next step we examine our VM to see if we can achieve the same by combining several network modes
+1. When we examine our VM we see that the already available network adapter is running in  [NAT](https://www.virtualbox.org/manual/ch06.html#network_nat) mode for the following reason:
+    > With VirtualBox, Vagrant requires the first network device attached to the virtual machine to be a NAT device. The NAT device is used for port forwarding, which is how Vagrant gets SSH access to the virtual machine.
+    > Therefore, any host-only or bridged networks will be added as additional network devices and exposed to the virtual machine as "eth1", "eth2", and so on."eth0" or "en0" is generally always the NAT device.
+    > It isn't currently possible to override this requirement, but it is important to understand that it is in place.
+    >
+    > <cite>-- O'Reilly  
+    > https://www.oreilly.com/library/view/vagrant-up-and/9781449336103/ch04.html
+    > </cite>
+1. The [NAT](https://www.virtualbox.org/manual/ch06.html#network_nat) mode fulfills all requirements exept of the VM1↔VM2 connection mode. Luckily for us there is also the Internal network mode that provides only the VM1↔VM2 connection mode. By adding a second adapter that uses the [Internal Networking](https://www.virtualbox.org/manual/ch06.html#network_internal) mode we could also create a network connection that supports all needed connection modes.
+
+### VM network setup
+
+We have [found out](#select-or-combine-networking-modes-to-fulfill-all-requirements) that two methods exist to setup a network that supports all needed connection methods:
+
+- NATservice
+- NAT & Internal Network
+
+Setting up an [Internal Network](https://www.virtualbox.org/manual/ch06.html#network_internal) is easier then setting up a [NATservice](https://www.virtualbox.org/manual/ch06.html#network_nat_service) and because of this we will use the NAT & [Internal Network](https://www.virtualbox.org/manual/ch06.html#network_internal) approach.
+
+To create the internal network for the master as well as for the worker vm do the following:
+
 1. Add the following to the Vagrantfile to setup the internal network for the Master: `master_config.vm.network "private_network", ip: "10.0.1.1", virtualbox__intnet: "K8sNetwork"`
-1. Add the following to the Vagrantfile to setup the internal network for the Worker: `worker_config.vm.network "private_network", ip: "10.0.1.2", virtualbox__intnet: "K8sNetwork"`
+2. Add the following to the Vagrantfile to setup the internal network for the Worker: `worker_config.vm.network "private_network", ip: "10.0.1.2", virtualbox__intnet: "K8sNetwork"`
+
+> :information_source: The already available NAT network mode supports ip-forwarding and because of that we don't need to do anything additionally for it
+
+### Guest OS network setup
+
+The access to the K8s cluster is always done through the master VM. Because of this we need to setup a route on the master node that forwards all ip-packets for the service to the worker node.
+The master node is connected with the worker node through the K8sNetwork. So what we need to do is to forward all ip-packets for the service to the network card that is attached to the K8sNetwork.
+
+<!--
+I have a pc with two network cards. 
+Card1:
+    * Is known as eth0
+    * Connected to network 10.0.2.0/24
+    * Has ip address 10.0.2.15
+Card2:
+    * Is known as eth1
+    * Connected to network 10.0.1.0/24
+    * Has ip address 10.0.1.1
+
+How do I make it possible that services offered by network 10.0.1.0/24 can be accessed from network 10.0.2.0/24
+
+Adding a static route to eth0 to send all traffic for network 10.0.1.0/24 to adapter eth1 with ip address 10.0.1.1
+
+Adding a static route like 'route add 10.0.0.0 mask 255.255.255.0 192.168.1.7' to the PC is just going to send traffic destined to the 10.0.0.0 /24 network to 192.168.1.7.
+Unless the device 192.168.1.7 is reachable from the 10 network (via routing) and has a capability to pass traffic between the two subnet, it will not be successful.
+In short, you need a layer 3 network device, this could be virtual, to provide the ability to route the traffic.
+
+https://community.spiceworks.com/topic/1957971-how-can-i-route-traffic-between-two-network-adapters
+-->
 
 ### Help
 
