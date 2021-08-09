@@ -29,11 +29,14 @@
   - [Dashboard](#dashboard)
 - [Network setup](#network-setup-1)
   - [Network requirements](#network-requirements)
-    - [Write down the requirements](#write-down-the-requirements)
-    - [Map the requirements with the available connection methods](#map-the-requirements-with-the-available-connection-methods)
-    - [Select or combine networking modes to fulfill all requirements](#select-or-combine-networking-modes-to-fulfill-all-requirements)
+    - [Collect requirements](#collect-requirements)
+    - [Map requirements](#map-requirements)
+    - [Select networking modes](#select-networking-modes)
   - [VM network setup](#vm-network-setup)
-  - [Guest OS network setup](#guest-os-network-setup)
+  - [Enabling services](#enabling-services)
+    - [VM setup](#vm-setup)
+    - [Guest OS network setup](#guest-os-network-setup)
+  - [Connect to vm with putty](#connect-to-vm-with-putty)
   - [Help](#help)
 - [Kubectl](#kubectl)
 - [Configuration files](#configuration-files)
@@ -448,7 +451,7 @@ To find out the needed network requirements I recommend the following approach:
 1. Open the virtual box [networking modes](https://www.virtualbox.org/manual/ch06.html#networkingmodes) page and map your requirements with the available connection methods
 1. Select a networking mode or combine several networking modes to create a network configuration that fulfills all requirements
 
-#### Write down the requirements
+#### Collect requirements
 
 Our requirements are the following:
 
@@ -457,7 +460,7 @@ Our requirements are the following:
 1. Host needs direct access to a master vm to be able to administrate the K8s cluster
 1. Services from the K8s cluster are only accessible from the external network if they were made available via port forwarding
 
-#### Map the requirements with the available connection methods
+#### Map requirements
 
 1. Open the virtual box [networking modes](https://www.virtualbox.org/manual/ch06.html#networkingmodes) page
 1. Create a table with the connection methods as header:
@@ -483,11 +486,10 @@ As example we will match the connection methods from [Write down the requirement
     |--------|--------|--------|-----------|----------
     |        |X       |X       |X          |Port forward
 
-#### Select or combine networking modes to fulfill all requirements
+#### Select networking modes
 
 1. Compare the created table with the table of the available networking modes and mark the network modes that support all needed connection possibilities
 1. In our case we have the following mode that directly supports all needed connection modes:
-
     - NATservice
 1. As next step we examine our VM to see if we can achieve the same by combining several network modes
 1. When we examine our VM we see that the already available network adapter is running in  [NAT](https://www.virtualbox.org/manual/ch06.html#network_nat) mode for the following reason:
@@ -496,7 +498,7 @@ As example we will match the connection methods from [Write down the requirement
     > It isn't currently possible to override this requirement, but it is important to understand that it is in place.
     >
     > <cite>-- O'Reilly  
-    > https://www.oreilly.com/library/view/vagrant-up-and/9781449336103/ch04.html
+    > <https://www.oreilly.com/library/view/vagrant-up-and/9781449336103/ch04.html>
     > </cite>
 1. The [NAT](https://www.virtualbox.org/manual/ch06.html#network_nat) mode fulfills all requirements exept of the VM1↔VM2 connection mode. Luckily for us there is also the Internal network mode that provides only the VM1↔VM2 connection mode. By adding a second adapter that uses the [Internal Networking](https://www.virtualbox.org/manual/ch06.html#network_internal) mode we could also create a network connection that supports all needed connection modes.
 
@@ -516,10 +518,27 @@ To create the internal network for the master as well as for the worker vm do th
 
 > :information_source: The already available NAT network mode supports ip-forwarding and because of that we don't need to do anything additionally for it
 
-### Guest OS network setup
+### Enabling services
 
-The access to the K8s cluster is always done through the master VM. Because of this we need to setup a route on the master node that forwards all ip-packets for the service to the worker node.
-The master node is connected with the worker node through the K8sNetwork. So what we need to do is to forward all ip-packets for the service to the network card that is attached to the K8sNetwork.
+To make the services of the K8s cluster available to the company or home network we need to do two things:
+
+- Create an ip-forwarding on the master vm for each port where a service is running
+- Setup a route on the master node OS that forwards all ip-packets for a given port to the worker node
+
+#### VM setup
+
+#### Guest OS network setup
+
+Iptables is used to set up, maintain, and inspect the tables of IP packet filter rules in the Linux kernel.
+
+Forwarding ip packets to another interface can be done by adding a static route with the `route add` command. As long as we are on the same network we also don't need a layer 3 network device for the routing. However forwarding ip packets this way allows us only to redirect all traffic. Because we also want to interact with the master vm separately we need a way to forward ip packets only if they are send to a specific port.
+
+1. Connect to the master vm. See: [Connect to vm with putty](#connect-to-vm-with-putty)
+
+References:
+
+* <https://unix.stackexchange.com/questions/239172/route-on-specific-interface-based-on-port>
+* <https://www.linuxquestions.org/questions/linux-networking-3/add-route-based-on-port-not-ip-486823/>
 
 <!--
 I have a pc with two network cards. 
@@ -536,12 +555,43 @@ How do I make it possible that services offered by network 10.0.1.0/24 can be ac
 
 Adding a static route to eth0 to send all traffic for network 10.0.1.0/24 to adapter eth1 with ip address 10.0.1.1
 
-Adding a static route like 'route add 10.0.0.0 mask 255.255.255.0 192.168.1.7' to the PC is just going to send traffic destined to the 10.0.0.0 /24 network to 192.168.1.7.
+Adding a static route like 'route add 10.0.0.0 mask 255.255.255.0 192.168.1.7' to the PC is just going to send traffic destined to the 10.0.0.0/24 network to 192.168.1.7.
 Unless the device 192.168.1.7 is reachable from the 10 network (via routing) and has a capability to pass traffic between the two subnet, it will not be successful.
 In short, you need a layer 3 network device, this could be virtual, to provide the ability to route the traffic.
 
 https://community.spiceworks.com/topic/1957971-how-can-i-route-traffic-between-two-network-adapters
 -->
+
+### Connect to vm with putty
+
+To create a ssh connection to one of our VMs with putty we need to convert the ssh key because putty uses a different format.
+
+I will use a fork of putty that is called kitty but the steps are identical for both applications.
+
+1. Open the utility `puttygen.exe` that comes with putty. If you use a different ssh client you can also download the utility separately from here: <https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html>. If you use kitty please note that kitty might not be the same version and because of that you might need to download an earlier verson of the `puttygen.exe` tool: <https://the.earth.li/~sgtatham/putty/0.74/w64/>
+2. Click on **File > Load private key**
+![](images/putty_file_load_private_key.png)
+1. Open the private key file for the vm that was created by vagrant. In my case this is: `C:\Users\dwolff\Projects\VagrantK8s\.vagrant\machines\K8s-Master\virtualbox\private_key`
+![](images/puttygen_conversions_open_key.png)
+1. Puttygen will tell you that it needs to be saved in putty format after it has been loaded
+![](images/putty_open_key.png)
+1. Click on **Save private key**
+![](images/puttygen_save_private_key.png)
+1. Confirm that you want to save the private key without a passphrase
+![](images/puttygen_confirm_save_without_password.png)
+1. Save the key in the same folder but this time with a .ppk file ending
+![](images/puttygen_save_as_ppk.png)
+1. Show the ssh configuration for our VMs
+![Show the ssh configuration](images/vagrant_show_ssh_config.png)
+1. Open putty
+1. Navigate to **Connection > Data** and enter *vagrant* as **Auto-login username**
+![](images/putty_enter_auto_login_name.png)
+1. Navigate to **SSH > Auth** and select the created `private_key.ppk` for **Private key file for authentication**
+![](images/putty_select_private_key.png)
+1. Navigate to **Session** and enter the ip address and the port for the connection
+![](images/kitty_connect_to_master_vm.png)
+1. Hit **Enter** to open the connection. Optionally you can also save it.
+![](images/kitty_connection_succeeded.png)
 
 ### Help
 
